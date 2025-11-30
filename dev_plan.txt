@@ -1,0 +1,130 @@
+4-Week Timeline
+Week 1: Architecture & Foundations
+Goal: Agree on core design before writing production code.
+Both devs (together or in parallel, then sync):
+
+Day 1-2: Decide on metadata strategy
+
+Will you store metadata inside the allocated block (e.g., header before user pointer)?
+Or separately (list/tree of tracking structures)?
+Why it matters: In-band is simpler but wastes space and fragments. Separate is cleaner but requires more bookkeeping.
+
+
+Day 2-3: Choose your search structure
+
+Start with linked list—it's simple and teaches the fundamentals.
+Document why you're not starting with hash tables or BSTs: linked lists let you understand the core problem before optimization.
+
+
+Day 3-4: Design the split/coalesce strategy
+
+When you allocate 5 bytes from a 4KB block, what happens to the remaining 4091 bytes?
+When the user frees that 5-byte block, can you merge it back with neighbors?
+Decide: will you coalesce immediately (on free) or lazily? Both are valid; document the tradeoff.
+
+
+Day 5: Write a design document (shared)
+
+One diagram showing: metadata structure, how blocks are linked, what mmap calls trigger
+Pseudocode for malloc and free logic (not real code yet)
+This forces agreement and saves refactoring later
+
+
+
+Deliverable: Shared design doc + agreed architecture.
+
+Week 2: Independent Implementation (Part 1 - Core Malloc)
+Each dev independently implements:
+
+my_malloc(size_t size)
+
+Request a large block from mmap if pool is empty
+Split the block into metadata + user pointer
+Iterate through linked list to find free space; if none, mmap again
+Return user pointer
+
+
+my_free(void *ptr)
+
+Find the metadata associated with this pointer
+Mark block as free
+(Don't coalesce yet—save for week 3)
+
+
+
+Key constraints to keep things simple:
+
+No coalescing yet (you'll revisit this)
+Use a single linked list (even if slow)
+Hard-code mmap block size (e.g., 4096 bytes) for now
+Print debug info: track how many mmap calls happen
+
+Why this split? Both devs learn the core loop: allocate, find, free. Once you both grok this, optimizations make sense.
+Deliverable: Working malloc and free that don't crash, plus test file showing it works.
+
+Week 3: Independent Implementation (Part 2 - Calloc & Realloc + Optimization)
+Each dev adds:
+
+my_calloc(size_t nmemb, size_t size)
+
+Allocate nmemb * size bytes
+Zero-initialize
+Architectural question: Do you reuse malloc or write custom logic? (Reuse is cleaner.)
+
+
+my_realloc(void *ptr, size_t size)
+
+If new size fits in current block: done
+Else: allocate new block, copy data, free old block
+Edge case thinking: What if ptr is NULL? (Should behave like malloc.)
+
+
+Optimization: Coalescing
+
+When a block is freed, check neighbors in the linked list
+If adjacent blocks are free, merge them
+This reduces fragmentation
+
+
+Optional optimizations (if time):
+
+First-fit vs best-fit search (measure which wastes less memory)
+Lazy coalescing (coalesce on malloc, not on free)
+
+
+
+Why week 3? You've proven the core works; now you refine without breaking fundamentals.
+Deliverable: Full malloc family + test suite showing coalescing works.
+
+Week 4: Code Review & Merge
+Both devs (structured):
+
+Day 1-2: Code review phase
+
+Each reads the other's code (not defensive—collaborative learning mindset)
+Document: "I did X because... What did you do? Why?"
+Areas to align: metadata format, mmap triggering, coalescing logic
+
+
+Day 2-3: Merge decisions
+
+Are both implementations similar enough to blend, or pick one and document why?
+Create unified Makefile, header file (function signatures must match)
+Don't rewrite: Take the simpler or clearer implementation wholesale
+
+
+Day 3-4: Integration testing
+
+Run a shared test suite (you write this together in week 1-2)
+Test: allocate, free, realloc, edge cases (NULL, 0 size, large allocations)
+Stress test: allocate 1000 blocks, free randomly, check no segfaults
+
+
+Day 4-5: Documentation
+
+Document design choices (why linked list, why immediate coalescing, etc.)
+README explaining how to use and test
+
+
+
+Deliverable: Merged, tested, documented codebase.
