@@ -8,7 +8,7 @@
     printf("Running %s...", #name); \
     name(); \
     printf(" PASSED\n"); \
-}
+} while(0)
 
 TEST(test_malloc_returns_non_null) {
     void *ptr = my_malloc(100);

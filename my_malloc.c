@@ -27,7 +27,7 @@ typedef struct block_header {
 #define HEADER_SIZE (sizeof(block_header_t))
 #define MMAP_BLOCK_SIZE 4096                    // standard 32 and 64-bit linux
 
-static block_header_t * head = NULL;            // head of linked list
+// static block_header_t * head = NULL;            // head of linked list
 
 void *my_malloc(size_t size) {
     if (size == 0) return NULL;                 // allocating a 0-sized chunk returns NULL
