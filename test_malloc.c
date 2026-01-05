@@ -105,6 +105,116 @@ TEST(test_calloc_overflow_protection) {
     assert(ptr == NULL);  // Should fail safely
 }
 
+// ========== realloc tests ==========
+
+TEST(test_realloc_null_ptr_behaves_like_malloc) {
+    // realloc(NULL, size) should behave like malloc(size)
+    void *ptr = my_realloc(NULL, 100);
+    assert(ptr != NULL);
+
+    // Should be able to write to it
+    char *str = (char *)ptr;
+    strcpy(str, "Hello");
+    assert(strcmp(str, "Hello") == 0);
+
+    my_free(ptr);
+}
+
+TEST(test_realloc_zero_size_frees_and_returns_null) {
+    // realloc(ptr, 0) should behave like free(ptr) and return NULL
+    void *ptr = my_malloc(100);
+    assert(ptr != NULL);
+
+    void *result = my_realloc(ptr, 0);
+    assert(result == NULL);
+    // ptr is now freed, don't use it
+}
+
+TEST(test_realloc_larger_size_preserves_data) {
+    // Allocate small, realloc to larger, verify data preserved
+    char *ptr = my_malloc(10);
+    assert(ptr != NULL);
+    strcpy(ptr, "Hello");
+
+    // Realloc to larger size (will likely move to new location)
+    char *new_ptr = my_realloc(ptr, 100);
+    assert(new_ptr != NULL);
+
+    // Original data should be preserved
+    assert(strcmp(new_ptr, "Hello") == 0);
+
+    // Should be able to write more
+    strcpy(new_ptr, "Hello, this is a much longer string!");
+    assert(strcmp(new_ptr, "Hello, this is a much longer string!") == 0);
+
+    my_free(new_ptr);
+}
+
+TEST(test_realloc_smaller_size_preserves_data) {
+    // Allocate large, realloc to smaller, verify data preserved
+    char *ptr = my_malloc(100);
+    assert(ptr != NULL);
+    strcpy(ptr, "Hello, World!");
+
+    // Realloc to smaller size (should fit in place)
+    void *old_addr = ptr;  // Save address for comparison
+    char *new_ptr = my_realloc(ptr, 20);
+    assert(new_ptr != NULL);
+
+    // Should return same pointer (fits in place)
+    assert(new_ptr == old_addr);
+
+    // Data should still be there
+    assert(strcmp(new_ptr, "Hello, World!") == 0);
+
+    my_free(new_ptr);
+}
+
+TEST(test_realloc_same_size_returns_same_pointer) {
+    // When size fits in current block, should return same pointer
+    int *ptr = my_malloc(sizeof(int) * 10);
+    assert(ptr != NULL);
+    ptr[0] = 42;
+    ptr[9] = 99;
+
+    // Save the original address
+    void *old_addr = ptr;
+
+    // Realloc to same size
+    int *new_ptr = my_realloc(ptr, sizeof(int) * 10);
+    assert(new_ptr != NULL);
+
+    // Should be the SAME pointer (fits in place, no move needed)
+    assert(new_ptr == old_addr);
+
+    // Data should be preserved
+    assert(new_ptr[0] == 42);
+    assert(new_ptr[9] == 99);
+
+    my_free(new_ptr);
+}
+
+TEST(test_realloc_preserves_partial_data_when_shrinking) {
+    // When reallocating to smaller size, partial data is preserved
+    int *ptr = my_malloc(sizeof(int) * 10);
+    assert(ptr != NULL);
+
+    for (int i = 0; i < 10; i++) {
+        ptr[i] = i * 10;
+    }
+
+    // Realloc to smaller (5 ints instead of 10)
+    int *new_ptr = my_realloc(ptr, sizeof(int) * 5);
+    assert(new_ptr != NULL);
+
+    // First 5 elements should be preserved
+    for (int i = 0; i < 5; i++) {
+        assert(new_ptr[i] == i * 10);
+    }
+
+    my_free(new_ptr);
+}
+
 int main() {
     printf("=== My Malloc TDD Test Suite ===\n\n");
 
@@ -121,6 +231,14 @@ int main() {
     RUN_TEST(test_calloc_zero_nmemb_returns_null);
     RUN_TEST(test_calloc_zero_size_returns_null);
     RUN_TEST(test_calloc_overflow_protection);
+
+    printf("\n--- realloc tests ---\n");
+    RUN_TEST(test_realloc_null_ptr_behaves_like_malloc);
+    RUN_TEST(test_realloc_zero_size_frees_and_returns_null);
+    RUN_TEST(test_realloc_larger_size_preserves_data);
+    RUN_TEST(test_realloc_smaller_size_preserves_data);
+    RUN_TEST(test_realloc_same_size_returns_same_pointer);
+    RUN_TEST(test_realloc_preserves_partial_data_when_shrinking);
 
     printf("\nAll tests passed!\n");
     return 0;

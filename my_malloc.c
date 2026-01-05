@@ -137,9 +137,39 @@ void *my_calloc(size_t nmemb, size_t size) {
     return ptr;
 }
 
-// stub
 void *my_realloc(void *ptr, size_t size) {
-    (void)ptr;
-    (void)size;
-    return NULL;
+    // Edge case 1: ptr is NULL -> behave like malloc
+    if (ptr == NULL) {
+        return my_malloc(size);
+    }
+
+    // Edge case 2: size is 0 -> behave like free and return NULL
+    if (size == 0) {
+        my_free(ptr);
+        return NULL;
+    }
+
+    // Get the current block header
+    block_header_t *block = (block_header_t *)ptr - 1;
+
+    // If new size fits in current block, return same pointer
+    if (block->size >= size) {
+        return ptr;  // No need to move or copy
+    }
+
+    // Need to allocate new block (current is too small)
+    void *new_ptr = my_malloc(size);
+    if (new_ptr == NULL) {
+        return NULL;  // Allocation failed
+    }
+
+    // Copy data from old block to new block
+    // Copy the smaller of: old size or new size
+    size_t copy_size = block->size < size ? block->size : size;
+    memcpy(new_ptr, ptr, copy_size);
+
+    // Free the old block
+    my_free(ptr);
+
+    return new_ptr;
 }
