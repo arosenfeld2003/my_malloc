@@ -3,14 +3,15 @@ Goal: Agree on core design before writing production code.
 Both devs (together or in parallel, then sync):
 
 * Decide on metadata strategy
-Will you store metadata inside the allocated block (e.g., header before user pointer)?
+Store metadata inside the allocated block (e.g., header before user pointer)...
 Or separately (list/tree of tracking structures)?
-Why it matters: In-band is simpler but wastes space and fragments. Separate is cleaner but requires more bookkeeping.
+TLDR: In-band is simpler but wastes space and fragments. Separate is cleaner but requires more bookkeeping.
+-> we chose inband (header)
 
 
-* Choose your search structure
-Start with linked list—it's simple and teaches the fundamentals.
-Document why you're not starting with hash tables or BSTs: linked lists let you understand the core problem before optimization.
+* Choose search structure
+-> Start with linked list—it's simple and teaches the fundamentals.
+Why not start with hash tables or BSTs: linked lists help us understand the core problem before optimization.
 
 * Design the split/coalesce strategy
 When you allocate 5 bytes from a 4KB block, what happens to the remaining 4091 bytes?
