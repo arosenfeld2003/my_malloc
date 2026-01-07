@@ -6,24 +6,27 @@
 
 /*
  * ARCHITECTURE: In-band metadata (header before user pointer)
+ * STRUCTURE: Doubly-linked list for O(1) coalescing
  *
  * Block Header Structure:
  * +------------------+
- * | size             | 8 bytes
- * | is_free          | 1 byte
- * | padding          | 7 bytes (alignment)
- * | next             | 8 bytes
- * +------------------+ <- Total: 24 bytes
+ * | size             | 8 bytes  (user data size, excludes header)
+ * | is_free          | 1 byte   (0 = allocated, 1 = free)
+ * | padding          | 7 bytes  (for 8-byte alignment)
+ * | next             | 8 bytes  (pointer to next block in list)
+ * | prev             | 8 bytes  (pointer to previous block in list)
+ * +------------------+ <- Total: 32 bytes
  * | user data...     | <- my_malloc returns pointer here
  * +------------------+
 
- * pointer arithmetic:
-  - block points to address 0x1000 (start of header)
-    - block + 1 means: 0x1000 + (1 × sizeof(block_header_t))..
-    - IMPORTANT: c pointer arithmetic automatically multiplies by type size!
-    - Since sizeof(block_header_t) = 24 bytes, this gives: 0x1000 + 24 = 0x1018
-    - So block + 1 points to the byte immediately after the header
-
+ * Pointer arithmetic:
+ *  - block points to address 0x1000 (start of header)
+ *  - block + 1 means: 0x1000 + (1 × sizeof(block_header_t))
+ *  - IMPORTANT: C pointer arithmetic automatically multiplies by type size!
+ *  - Since sizeof(block_header_t) = 32 bytes, this gives: 0x1000 + 32 = 0x1020
+ *  - So block + 1 points to the byte immediately after the header
+ *
+ * Memory layout example:
  * Address 0x1000:  +------------------+
  *                  | size (8 bytes)   |
  *                  +------------------+
@@ -32,17 +35,25 @@
  *                  | padding (7 bytes)|
  *                  +------------------+
  *                  | next (8 bytes)   |
- * Address 0x1018:   +------------------+ <-- block + 1 points HERE
+ *                  +------------------+
+ *                  | prev (8 bytes)   |
+ * Address 0x1020:  +------------------+ <-- block + 1 points HERE
  *                  | user data...     |
  *                  | user data...     |
  *                  +------------------+
+ *
+ * Linked list structure:
+ *    NULL <- [Block 3] <-> [Block 2] <-> [Block 1] -> NULL
+ *                                           ^
+ *                                         head
  */
 
 typedef struct block_header {
     size_t size;                                // user data, no header
     char is_free;                               // 1 -> free, 0 -> allocated
     char padding[7];                            // 8-byte alignment
-    struct block_header *next;                  // Linked list -> all blocks
+    struct block_header *next;                  // Next block in linked list
+    struct block_header *prev;                  // Previous block in linked list (for O(1) coalescing)
 } block_header_t;
 
 #define HEADER_SIZE (sizeof(block_header_t))
@@ -52,6 +63,11 @@ static block_header_t *head = NULL;             // head of linked list
 // https://man7.org/linux/man-pages/man2/mmap.2.html
 static int mmap_count = 0;                      // debug: track mmap calls
 
+// Debug function to check mmap count
+int get_mmap_count(void) {
+    return mmap_count;
+}
+
 void *my_malloc(size_t size) {
     if (size == 0) return NULL;                 // allocating a 0-sized chunk returns NULL
 
@@ -60,8 +76,41 @@ void *my_malloc(size_t size) {
     while (current != NULL) {
         if (current->is_free && current->size >= size) {
             // Found a free block that fits
-            current->is_free = 0;               // mark as allocated
-            return (void *)(current + 1);       // return pointer after header
+
+            // Check if block is large enough to split
+            // Only split if remainder would be useful (>= HEADER_SIZE + minimum useful size)
+            size_t min_split_size = HEADER_SIZE + 32;  // Minimum 32 bytes user data in remainder
+
+            if (current->size >= size + min_split_size) {
+                // Split the block
+                size_t original_size = current->size;
+
+                // Current block becomes the allocated portion
+                current->size = size;
+                current->is_free = 0;
+
+                // Create new block for the remainder
+                // Calculate address: current + header + size
+                block_header_t *remainder = (block_header_t *)((char *)(current + 1) + size);
+                remainder->size = original_size - size - HEADER_SIZE;
+                remainder->is_free = 1;
+                remainder->next = current->next;
+                remainder->prev = current;
+
+                // Update next block's prev pointer (if it exists)
+                if (remainder->next != NULL) {
+                    remainder->next->prev = remainder;
+                }
+
+                // Insert remainder into linked list after current
+                current->next = remainder;
+
+                return (void *)(current + 1);
+            } else {
+                // Block isn't large enough to split, use whole block
+                current->is_free = 0;               // mark as allocated
+                return (void *)(current + 1);       // return pointer after header
+            }
         }
         current = current->next;
     }
@@ -87,6 +136,13 @@ void *my_malloc(size_t size) {
     block->size = alloc_size - HEADER_SIZE;     // user data size
     block->is_free = 0;                         // allocated
     block->next = head;                         // insert at head
+    block->prev = NULL;                         // new head has no prev
+
+    // Update old head's prev pointer (if it exists)
+    if (head != NULL) {
+        head->prev = block;
+    }
+
     head = block;
 
     // 4. Return pointer after header
@@ -102,7 +158,40 @@ void my_free(void *ptr) {
     // 2. Mark as free
     block->is_free = 1;
 
-    // TODO: coalescing
+    // 3. Coalesce with next block (if free and physically adjacent)
+    block_header_t *next = block->next;
+    if (next != NULL && next->is_free) {
+        // Check if blocks are physically adjacent in memory
+        void *expected_next_addr = (char *)(block + 1) + block->size;
+        if ((void *)next == expected_next_addr) {
+            // Merge next into block
+            block->size += HEADER_SIZE + next->size;
+            block->next = next->next;
+
+            // Update the next->next block's prev pointer (if it exists)
+            if (next->next != NULL) {
+                next->next->prev = block;
+            }
+        }
+    }
+
+    // 4. Coalesce with previous block (if free and physically adjacent)
+    block_header_t *prev = block->prev;
+    if (prev != NULL && prev->is_free) {
+        // Check if blocks are physically adjacent in memory
+        void *expected_block_addr = (char *)(prev + 1) + prev->size;
+        if ((void *)block == expected_block_addr) {
+            // Merge block into prev
+            prev->size += HEADER_SIZE + block->size;
+            prev->next = block->next;
+
+            // Update the block->next's prev pointer (if it exists)
+            if (block->next != NULL) {
+                block->next->prev = prev;
+            }
+            // Note: block is now absorbed into prev, so we're done
+        }
+    }
 }
 
 /*
